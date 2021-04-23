@@ -1,10 +1,11 @@
-﻿using LoansEventProcessor.Core.Application.Ports.In;
+﻿using LoansEventProcessor.Core.Application.Ports.Input;
 using LoansEventProcessor.Core.Domain;
 using System;
 using System.Linq;
 using System.Collections.Generic;
 using System.Text;
-using LoansEventProcessor.Core.Application.Ports.Out;
+using LoansEventProcessor.Core.Application.Ports.Output;
+using System.Threading.Tasks;
 
 namespace LoansEventProcessor.Core.Application
 {
@@ -12,7 +13,7 @@ namespace LoansEventProcessor.Core.Application
     {
         private readonly Dictionary<string, IEventProcessor> _processors = new Dictionary<string, IEventProcessor>()
         {
-            ["LoanCreated_v1"] = new LoanCreatedEventProcessor()
+            ["LoanCreated.v1"] = new LoanCreatedEventProcessor()
         };
 
         private readonly IEventRepository _eventRepository;
@@ -24,16 +25,16 @@ namespace LoansEventProcessor.Core.Application
             _loanRepository = loanRepository;
         }
 
-        public void Process(Event newEvent)
+        public async Task Process(Event newEvent)
         {
             // 1.1. read snapshot
-            var loanSnapshot = _loanRepository.GetLoan(newEvent.EntityId);
+            var loanSnapshot = await _loanRepository.GetLoan(newEvent.EntityId);
             // 1.2. add +1 to version
             newEvent.Version = loanSnapshot.LastEventVersion + 1;
             // 1.3. conditional insert
-            _eventRepository.SaveEvent(newEvent);
+            await _eventRepository.SaveEvent(newEvent);
             // 2.2. read all events since snapshot's version
-            List<Event> events = new List<Event>();
+            List<Event> events = await _eventRepository.GetEventsSinceVersion(newEvent.EntityId, loanSnapshot.LastEventVersion);
             // 2.3. process events to generate new snapshot
             foreach (var @event in events.OrderBy(e => e.Version))
             {
@@ -41,9 +42,9 @@ namespace LoansEventProcessor.Core.Application
                 loanSnapshot.Item = processor.ProcessEvent(@event, loanSnapshot.Item);
             }
             // 2.4. update snapshot last event version
-            loanSnapshot.LastEventVersion = newEvent.Version;
+            loanSnapshot.NewEventVersion = newEvent.Version;
             // 2.5. conditional update
-            _loanRepository.SaveLoan(loanSnapshot);
+            await _loanRepository.SaveLoan(loanSnapshot);
 
             // 3.1 generate "thin" vision
             // 3.2 conditional update (considering snapshot's last event version)

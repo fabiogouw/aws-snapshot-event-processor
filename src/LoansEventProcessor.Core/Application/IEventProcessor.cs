@@ -1,4 +1,4 @@
-﻿using LoansEventProcessor.Core.Application.Ports.In;
+﻿using LoansEventProcessor.Core.Application.Ports.Input;
 using LoansEventProcessor.Core.Domain;
 using System;
 using System.Collections.Generic;

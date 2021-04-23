@@ -2,16 +2,16 @@
 using System.Collections.Generic;
 using System.Text;
 
-namespace LoansEventProcessor.Core.Application.Ports.In
+namespace LoansEventProcessor.Core.Application.Ports.Input
 {
     public class Event
     {
-        public Event(string id, string entityId, string eventType, DateTimeOffset eventTime, string content)
+        public Event(string entityId, string id, string eventType, long eventTimeInSeconds, string content)
         {
-            Id = id;
             EntityId = entityId;
+            Id = id;
             EventType = eventType;
-            EventTime = eventTime;
+            EventTime = DateTimeOffset.FromUnixTimeSeconds(eventTimeInSeconds);
             Content = content;
         }
         public string Id { get; private set; }
