@@ -1,7 +1,9 @@
 ﻿using Amazon.DynamoDBv2;
 using Amazon.DynamoDBv2.DocumentModel;
+using Amazon.DynamoDBv2.Model;
 using LoansEventProcessor.Core.Application.Ports.Output;
 using LoansEventProcessor.Core.Domain;
+using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
 using System.Text;
@@ -12,34 +14,41 @@ namespace LoansEventProcessor.Infra.Adapters
 {
     public class DynamoDbLoanRepository : ILoanRepository
     {
-        private static readonly AmazonDynamoDBClient client = new AmazonDynamoDBClient();
-        private static readonly string tableName = "LoanSnapshot";
+        private static readonly AmazonDynamoDBClient _client = new AmazonDynamoDBClient();
+        private static readonly string _tableName = "LoanSnapshot";
+        private readonly ILogger _logger;
 
+        public DynamoDbLoanRepository(ILogger logger)
+        {
+            _logger = logger;
+        }
         public async Task<Snapshot<Loan>> GetLoan(string loanId)
         {
-            Table table = Table.LoadTable(client, tableName);
+            Table table = Table.LoadTable(_client, _tableName);
+            Document document = await table.GetItemAsync(loanId);
 
-            GetItemOperationConfig config = new GetItemOperationConfig
+            if(document != null)
             {
-                AttributesToGet = new List<string> { "Id", "Version", "Content" }
-            };
-            Document document = await table.GetItemAsync(loanId, config);
-
-            var loan = JsonSerializer.Deserialize<Loan>(document["Content"].AsString());
-            return new Snapshot<Loan>(loan, document["Version"].AsInt());
+                var loan = JsonSerializer.Deserialize<Loan>(document["Content"].AsString());
+                return new Snapshot<Loan>(loan, document["Id"].AsString(), document["Version"].AsInt());
+            }
+            else
+            {
+                return null;
+            }
         }
 
-        public async Task SaveLoan(Snapshot<Loan> loan)
+        public async Task<bool> SaveLoan(Snapshot<Loan> loan)
         {
-            Table table = Table.LoadTable(client, tableName);
+            Table table = Table.LoadTable(_client, _tableName);
 
             var document = new Document();
             document["Id"] = loan.Item.Id;
             document["Version"] = loan.NewEventVersion;
-            document["Content"] = Document.FromJson(JsonSerializer.Serialize(loan.Item));
+            document["Content"] = JsonSerializer.Serialize(loan.Item);
 
             var expr = new Expression();
-            expr.ExpressionStatement = "Version = :version";
+            expr.ExpressionStatement = "Version = :version OR attribute_not_exists(Id)";
             expr.ExpressionAttributeValues[":version"] = loan.LastEventVersion;
 
             PutItemOperationConfig config = new PutItemOperationConfig()
@@ -47,7 +56,16 @@ namespace LoansEventProcessor.Infra.Adapters
                 ConditionalExpression = expr
             };
 
-            await table.PutItemAsync(document, config);
+            try
+            {
+                await table.PutItemAsync(document, config);
+                return true;
+            }
+            catch (ConditionalCheckFailedException ex)
+            {
+                _logger.LogError(ex, "Error while saving new event.");
+                return false;
+            }
         }
     }
 }
