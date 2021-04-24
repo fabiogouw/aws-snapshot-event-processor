@@ -1,6 +1,7 @@
 ﻿using Amazon.DynamoDBv2;
 using Amazon.DynamoDBv2.DocumentModel;
 using Amazon.DynamoDBv2.Model;
+using LoansEventProcessor.Core.Application.Ports.Input;
 using LoansEventProcessor.Core.Application.Ports.Output;
 using LoansEventProcessor.Core.Domain;
 using Microsoft.Extensions.Logging;
@@ -15,7 +16,6 @@ namespace LoansEventProcessor.Infra.Adapters
     public class DynamoDbLoanRepository : ILoanRepository
     {
         private static readonly AmazonDynamoDBClient _client = new AmazonDynamoDBClient();
-        private static readonly string _tableName = "LoanSnapshot";
         private readonly ILogger _logger;
 
         public DynamoDbLoanRepository(ILogger logger)
@@ -24,10 +24,10 @@ namespace LoansEventProcessor.Infra.Adapters
         }
         public async Task<Snapshot<Loan>> GetLoan(string loanId)
         {
-            Table table = Table.LoadTable(_client, _tableName);
+            Table table = Table.LoadTable(_client, "LoanSnapshot");
             Document document = await table.GetItemAsync(loanId);
 
-            if(document != null)
+            if (document != null)
             {
                 var loan = JsonSerializer.Deserialize<Loan>(document["Content"].AsString());
                 return new Snapshot<Loan>(loan, document["Id"].AsString(), document["Version"].AsInt());
@@ -40,32 +40,57 @@ namespace LoansEventProcessor.Infra.Adapters
 
         public async Task<bool> SaveLoan(Snapshot<Loan> loan)
         {
-            Table table = Table.LoadTable(_client, _tableName);
-
-            var document = new Document();
-            document["Id"] = loan.Item.Id;
-            document["Version"] = loan.NewEventVersion;
-            document["Content"] = JsonSerializer.Serialize(loan.Item);
-
-            var expr = new Expression();
-            expr.ExpressionStatement = "Version = :version OR attribute_not_exists(Id)";
-            expr.ExpressionAttributeValues[":version"] = loan.LastEventVersion;
-
-            PutItemOperationConfig config = new PutItemOperationConfig()
+            var response = await _client.TransactWriteItemsAsync(new TransactWriteItemsRequest
             {
-                ConditionalExpression = expr
+                TransactItems = new List<TransactWriteItem>
+                {
+                    new TransactWriteItem() { Put = CreateLoanSaveRequest(loan) },
+                    new TransactWriteItem() { Put = CreateLoanEventSaveRequest(loan.Event) }
+                },
+                ClientRequestToken = loan.Event.Id
+            });
+            return response.HttpStatusCode == System.Net.HttpStatusCode.OK;
+        }
+
+        private Put CreateLoanSaveRequest(Snapshot<Loan> loan)
+        {
+            var put = new Put()
+            {
+                TableName = "LoanSnapshot"
             };
 
-            try
+            put.ExpressionAttributeValues[":version"] = new AttributeValue { N = loan.LastEventVersion.ToString() };
+            put.ConditionExpression = "Version = :version OR attribute_not_exists(Id)";
+            put.Item = new Dictionary<string, AttributeValue>()
             {
-                await table.PutItemAsync(document, config);
-                return true;
-            }
-            catch (ConditionalCheckFailedException ex)
+                ["Id"] = new AttributeValue { S = loan.Item.Id },
+                ["Version"] = new AttributeValue { N = loan.NewEventVersion.ToString() },
+                ["UpdatedAt"] = new AttributeValue { N = loan.UpdatedAt.ToUnixTimeMilliseconds().ToString() },
+                ["Content"] = new AttributeValue { S = JsonSerializer.Serialize(loan.Item) }
+            };
+
+            return put;
+        }
+
+        private Put CreateLoanEventSaveRequest(Event @event)
+        {
+            var put = new Put()
             {
-                _logger.LogError(ex, "Error while saving new event.");
-                return false;
-            }
+                TableName = "Events"
+            };
+
+            put.ConditionExpression = "attribute_not_exists(Id)";
+            put.Item = new Dictionary<string, AttributeValue>()
+            {
+                ["EntityId"] = new AttributeValue { S = @event.EntityId },
+                ["Id"] = new AttributeValue { S = @event.Id },
+                ["EventType"] = new AttributeValue { S = @event.EventType },
+                ["EventTime"] = new AttributeValue { N = @event.EventTime.ToUnixTimeMilliseconds().ToString() },
+                ["ProcessesAt"] = new AttributeValue { N = @event.ProcessesAt.ToUnixTimeMilliseconds().ToString() },
+                ["Content"] = new AttributeValue { S = @event.Content }
+            };
+
+            return put;
         }
     }
 }

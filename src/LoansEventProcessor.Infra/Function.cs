@@ -28,7 +28,7 @@ namespace LoansEventProcessor.Infra
         public async Task FunctionHandler(SQSEvent input, ILambdaContext context)
         {
             ILogger logger = new LambdaLoggerWrapper();
-            var processor = new SnapshotGenerationUseCase(logger, new DynamoDbEventRepository(logger), new DynamoDbLoanRepository(logger));
+            var processor = new SnapshotGenerationUseCase(logger, new DynamoDbLoanRepository(logger));
             foreach (var record in input.Records)
             {
                 string eventType = record.Attributes.SingleOrDefault(s => s.Key == "EventType").Value;
