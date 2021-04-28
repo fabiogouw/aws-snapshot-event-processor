@@ -82,7 +82,7 @@ namespace LoansEventProcessor.Infra.Adapters
             put.ConditionExpression = "attribute_not_exists(Id)";
             put.Item = new Dictionary<string, AttributeValue>()
             {
-                ["EntityId"] = new AttributeValue { S = @event.EntityId },
+                ["LoanId"] = new AttributeValue { S = @event.LoanId },
                 ["Id"] = new AttributeValue { S = @event.Id },
                 ["EventType"] = new AttributeValue { S = @event.EventType },
                 ["EventTime"] = new AttributeValue { N = @event.EventTime.ToUnixTimeMilliseconds().ToString() },

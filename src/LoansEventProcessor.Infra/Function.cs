@@ -32,7 +32,7 @@ namespace LoansEventProcessor.Infra
             foreach (var record in input.Records)
             {
                 string eventType = record.Attributes.SingleOrDefault(s => s.Key == "EventType").Value;
-                var @event = new Event(record.Attributes.SingleOrDefault(s => s.Key == "EntityId").Value,
+                var @event = new Event(record.Attributes.SingleOrDefault(s => s.Key == "LoanId").Value,
                     record.MessageId,
                     eventType,
                     long.Parse(record.Attributes.SingleOrDefault(s => s.Key == "SentTimestamp").Value), 

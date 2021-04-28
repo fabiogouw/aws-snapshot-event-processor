@@ -1,4 +1,5 @@
-﻿using LoansEventProcessor.Core.Domain;
+﻿using LoansEventProcessor.Core.Application.Ports.Input;
+using LoansEventProcessor.Core.Domain;
 using System;
 using System.Collections.Generic;
 using System.Text;
@@ -9,6 +10,6 @@ namespace LoansEventProcessor.Core.Application.Ports.Output
     public interface ILoanRepository
     {
         Task<Snapshot<Loan>> GetLoan(string loanId);
-        Task SaveLoan(Snapshot<Loan> loan);
+        Task<bool> SaveLoan(Snapshot<Loan> loan);
     }
 }
