@@ -5,6 +5,8 @@ using System.Threading.Tasks;
 
 using Amazon.Lambda.Core;
 using Amazon.Lambda.SQSEvents;
+using Amazon.SQS;
+using Amazon.SQS.Model;
 using LoansEventProcessor.Core;
 using LoansEventProcessor.Core.Application;
 using LoansEventProcessor.Core.Application.Ports.Input;
@@ -20,7 +22,7 @@ namespace LoansEventProcessor.Infra
     {
         
         /// <summary>
-        /// A simple function that takes a string and does a ToUpper
+        /// Processes the events that defines loans updates.
         /// </summary>
         /// <param name="input"></param>
         /// <param name="context"></param>
@@ -29,16 +31,52 @@ namespace LoansEventProcessor.Infra
         {
             ILogger logger = new LambdaLoggerWrapper();
             var processor = new SnapshotGenerationUseCase(logger, new DynamoDbLoanRepository(logger));
+            var processedMessages = new List<DeleteMessageBatchRequestEntry>();
+            var exceptions = new List<Exception>();
             foreach (var record in input.Records)
             {
-                string eventType = record.Attributes.SingleOrDefault(s => s.Key == "EventType").Value;
-                var @event = new Event(record.Attributes.SingleOrDefault(s => s.Key == "LoanId").Value,
-                    record.MessageId,
-                    eventType,
-                    long.Parse(record.Attributes.SingleOrDefault(s => s.Key == "SentTimestamp").Value), 
-                    record.Body);
-                
-                await processor.Process(@event);
+                try
+                {
+                    string eventType = record.Attributes.SingleOrDefault(s => s.Key == "EventType").Value;
+                    var @event = new Event(record.Attributes.SingleOrDefault(s => s.Key == "LoanId").Value,
+                        record.MessageId,
+                        eventType,
+                        long.Parse(record.Attributes.SingleOrDefault(s => s.Key == "SentTimestamp").Value),
+                        record.Body);
+
+                    await processor.Process(@event);
+
+                    var processedMessageToBeDeleted = new DeleteMessageBatchRequestEntry
+                    {
+                        Id = record.MessageId,
+                        ReceiptHandle = record.ReceiptHandle
+                    };
+                    processedMessages.Add(processedMessageToBeDeleted);
+                }
+                catch(Exception ex)
+                {
+                    exceptions.Add(ex);
+                }
+            }
+            await RemoveProcessedMessagesFromQueue(processedMessages);
+            if (exceptions.Count > 0)
+            {
+                throw new AggregateException(exceptions);
+            }
+        }
+
+        private async Task RemoveProcessedMessagesFromQueue(List<DeleteMessageBatchRequestEntry> processedMessages)
+        {
+            if (processedMessages.Count > 0)
+            {
+                var client = new AmazonSQSClient();
+                var delRequest = new DeleteMessageBatchRequest
+                {
+                    Entries = processedMessages,
+                    QueueUrl = Environment.GetEnvironmentVariable("LoansEventsQueue")
+                };
+
+                await client.DeleteMessageBatchAsync(delRequest);
             }
         }
     }
